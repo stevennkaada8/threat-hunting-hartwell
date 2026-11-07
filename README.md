@@ -11,7 +11,7 @@
 
 ##  Scenario
 
-Management has received a helpdesk ticket from a Finance user called Mark Smith reporting repeated login prompts on NPT-WS01 overnight. Subsequent analysis shows a helpdesk account was used to authenticate from an external IP address outside of normal business hours. Microsoft Sentinel has already raised analytic alerts including one on a second host, suggesting the activity may not be confined to a single machine. The goal is to determine, whether this was a genuine compromise, reconstruct how the attacker gained access, what they did once inside and establish the full scope across the environment. If evidence of compromise, persistence or lateral movement is found. please let management know imediatedly.
+Hartwell Medical Group is a regional multi-specialty physician group operating a public WordPress site for patient scheduling and practice information. On 23 October 2026, the on-call SOC analyst received a cluster of auditd alerts from the Hartwell web server (192.168.1.120) indicating file writes to the Apache webroot by the www-data service account. The goal is to determine, whether this was a genuine compromise, reconstruct how the attacker gained access, what they did once inside and establish the full scope across the environment. If evidence of compromise, persistence or lateral movement is found. please let management know imediatedly.
 
 ---
 
