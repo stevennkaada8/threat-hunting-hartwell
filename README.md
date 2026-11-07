@@ -16,173 +16,164 @@ Hartwell Medical Group is a regional multi-specialty physician group operating a
 ---
 
 ## Steps Taken
-
-### 1. Searched the `DeviceLogonEvents` Table 
+## Section 1: Reconnaissance
+### 1. Searched the `HartwellHTTPEnriched_CL` Table 
 
 Searched for the account which the attacker had succeeded with and operated under
 
 **Query used to locate events:**
 
 ```kql
-let start_time = datetime(2026-04-22T02:00:00.00Z);
-let end_time = datetime(2026-04-22T08:00:00.00Z);
-let HostInQuestion = "npt-ws01";
-DeviceLogonEvents
-| where TimeGenerated between (start_time .. end_time)
-| where DeviceName == HostInQuestion
+HartwellHTTPEnriched_CL
+| get schema
+
+HartwellApache_CL
+| get schema
+
+HartwellHTTPEnriched_CL
+| where OriginalTime between (datetime(2026-10-23T04:00:00Z) .. datetime(2026-10-23T16:00:00Z))
+| summarize Requests=count() by id_orig_h, method, content_type
+| order by Requests desc
 ```
-<img width="1420" height="345" alt="image" src="https://github.com/user-attachments/assets/9a439086-8b4d-4bba-b033-b382063744aa" />
+<img width="704" height="249" alt="image" src="https://github.com/user-attachments/assets/0e652e54-1a85-44b3-9e45-13d00ed25329" />
 
 ---
 
-### 2. Searched the `DeviceLogonEvents` Table
+### 2. Searched the `HartwellApache_CL` Table
 
-Found the external IP Address which the attacker authenticated from
+Found the service that the attacker was operating from
 
-**Query used to locate event:**
+**Query used to locate service:**
 
 ```kql
 
-let start_time = datetime(2026-04-22T02:00:00.00Z);
-let end_time = datetime(2026-04-22T08:00:00.00Z);
-let HostInQuestion = "npt-ws01";
-DeviceLogonEvents
-| where TimeGenerated between (start_time .. end_time)
-| where DeviceName == HostInQuestion
-| where ActionType == "LogonSuccess"
-| project TimeGenerated, DeviceName, ActionType, AccountName, RemoteIP
+HartwellApache_CL
+| where OriginalTime between (datetime(2026-10-23T04:00:00Z) .. datetime(2026-10-23T16:00:00Z))
+| search "nikto" or "sqlmap" or "wpscan" or "gobuster" or "nmap" or "dirb" or "dirbuster" or "ffuf" or "feroxbuster" or "masscan" or "nuclei" or "zgrab"
+| take 20
 ```
-<img width="1434" height="484" alt="image" src="https://github.com/user-attachments/assets/90db4837-702c-4d8a-85a1-ac18196ebabb" />
+<img width="722" height="212" alt="image" src="https://github.com/user-attachments/assets/b6a6cb91-e7c3-4d26-a747-1332926a0b7b" />
+
 
 ---
-
-### 3. Searched the `DeviceProcessEvents` Table for Process Execution
+## Section 2: The Exploit
+### 1. Searched the `HartwellHTTPEnriched_CL` Table to search session name
 
 Searched for the command line that launched the attack
 
 **Query used to locate events:**
 
 ```kql
-let start_time = datetime(2026-04-22T02:00:00.00Z);
-let end_time = datetime(2026-04-22T08:00:00.00Z);
-let HostInQuestion = "npt-ws01";
-DeviceProcessEvents
-| where TimeGenerated between (start_time .. end_time)
-| where AccountName == "helpdesk"
-| where DeviceName == HostInQuestion
-| project DeviceName, ActionType, FileName, TimeGenerated, ProcessCommandLine, InitiatingProcessCommandLine
+HartwellHTTPEnriched_CL
+| where OriginalTime between (datetime(2026-10-23T04:00:00Z) .. datetime(2026-10-23T16:00:00Z))
+| search "PHPSESSID" or "upload_progress" or "PHP_SESSION"
+| take 10
+
 ```
-<img width="1426" height="109" alt="image" src="https://github.com/user-attachments/assets/dea72774-2b82-464e-874c-838b898e2663" />
+<img width="741" height="301" alt="image" src="https://github.com/user-attachments/assets/07b01b1b-a646-4394-ac96-f411228dec70" />
+
 
 ---
 
-### 4. Searched the `DeviceProcessEvents` Table for the Parent Process
+### 2. Searched the `HartwellHTTPEnriched_CL` Table for the exploit delivery
 
-Searched for the immediate parent process that spawned the cmd.exe which had confirmed a remote WMI execution rather than a local user.
+Searched for the request that was used to deliver the exploit
+**Query used to locate events:**
+
+```kql
+HartwellHTTPEnriched_CL
+| where OriginalTime between (datetime(2026-10-23T04:00:00Z) .. datetime(2026-10-23T16:00:00Z))
+| summarize Requests=count() by id_orig_h, method, content_type
+| order by Requests desc
+```
+<img width="409" height="225" alt="image" src="https://github.com/user-attachments/assets/2b598b2c-f45b-47ec-a350-0117bde4fed3" />
+
+
+
+---
+
+### 3. Searched the `HartwellHTTPEnriched_CL` Table to find the new file that appeared
+
+Searched for the files that were dropped on the server and checked each one with .php extension to see which one was unusual
 
 **Query used to locate events:**
 
 ```kql
-let start_time = datetime(2026-04-22T02:00:00.00Z);
-let end_time = datetime(2026-04-22T08:00:00.00Z);
-let HostInQuestion = "npt-ws01";
-DeviceProcessEvents
-| where TimeGenerated between (start_time .. end_time)
-| where AccountName == "helpdesk"
-| where DeviceName == HostInQuestion
-| project DeviceName, ActionType, FileName, TimeGenerated, ProcessCommandLine, InitiatingProcessCommandLine, InitiatingProcessFileName
+HartwellHTTPEnriched_CL
+| where OriginalTime between (datetime(2026-10-23T04:00:00Z) .. datetime(2026-10-23T16:00:00Z))
+| where id_orig_h == "192.168.1.100"
+| summarize FirstSeen=min(OriginalTime), Requests=count(), Methods=make_set(method) by uri
+| order by FirstSeen asc
 ```
-<img width="781" height="105" alt="image" src="https://github.com/user-attachments/assets/0bd2ec94-dfa2-4874-8de6-9213189faab5" />
+<img width="428" height="317" alt="image" src="https://github.com/user-attachments/assets/b60a2bec-2c99-46c4-a937-8483bc99a4cb" />
+
 
 
 ---
+## Section 3: Remote Control
+### 1. Searched the `HartwellSysmon_CL` Table to find the account which the attacker had use
 
-### 5. Searched the `DeviceNetworkEvents` Table to filter legitimate traffic
-
-Searched for command-and-control domain the host beaconed to by filtering outbound HTTPS connections to exclude legitimate Microsoft signed traffic
+Identified the account that the attacker had used to execute the commands
 
 **Query used to locate events:**
 
 ```kql
-let start_time = datetime(2026-04-22T02:00:00.00Z);
-let end_time = datetime(2026-04-22T08:00:00.00Z);
-let HostInQuestion = "npt-ws01";
-DeviceNetworkEvents
-| where TimeGenerated between (start_time .. end_time)
-| where InitiatingProcessAccountName == "helpdesk"
-| project DeviceName, ActionType, RemoteUrl, TimeGenerated, InitiatingProcessCommandLine, InitiatingProcessFileName
+HartwellSysmon_CL
+| where OriginalTime between (datetime(2026-10-23T04:00:00Z) .. datetime(2026-10-23T16:00:00Z))
+| where EventID == "1"
+| where ParentImage has "apache2"
+| summarize Count=count(), First=min(OriginalTime) by User, ParentUser
+| order by First asc
 ```
-<img width="1440" height="119" alt="image" src="https://github.com/user-attachments/assets/7238753c-8029-46e1-a696-87290fc12c1b" />
+<img width="605" height="176" alt="image" src="https://github.com/user-attachments/assets/f9777975-2d06-49a4-b883-633c5837c106" />
+
 
 
 ---
 
-### 6. Searched the `DeviceProcessEvents` Table to find the file dropped
+### 2. Searched the `HartwellHTTPEnriched_CL` Table to find the Hidden Trigger
 
-Identified the executable dropped into a staging location (C:\Windows\Temp) and captured its SHA256 hash, noting the unusual creating process as an indicator of how the file was delivered onto the host.
+Reviewed every header name to find and files starting with "X" which had the trigger
 
 **Query used to locate events:**
 
 ```kql
-let start_time = datetime(2026-04-22T02:00:00.00Z);
-let end_time = datetime(2026-04-22T08:00:00.00Z);
-let HostInQuestion = "npt-ws01";
-DeviceProcessEvents
-| where TimeGenerated between (start_time .. end_time)
-| where DeviceName == HostInQuestion
-| project DeviceName, ActionType, FileName, SHA256, ProcessCommandLine, InitiatingProcessCommandLine, InitiatingProcessFileName, InitiatingProcessAccountName
-| where InitiatingProcessAccountName == "helpdesk"
+HartwellHTTPEnriched_CL
+| where OriginalTime between (datetime(2026-10-23T04:00:00Z) .. datetime(2026-10-23T16:00:00Z))
+| where id_orig_h == "192.168.1.100"
+| extend h = extract_all(@'"?([A-Za-z0-9-]+)"?\s*[:=]', request_headers)
+| mv-expand h to typeof(string)
+| summarize Count=count(), Example=take_any(uri) by h
+| order by Count asc
 ```
-<img width="1430" height="108" alt="image" src="https://github.com/user-attachments/assets/3e40896a-8668-482d-b358-4cc715a10bc1" />
+<img width="419" height="269" alt="image" src="https://github.com/user-attachments/assets/fc322b1e-5733-4de9-81b6-ff79abbbda3d" />
+
 
 
 ---
 
-### 7. Searched the `DeviceRegistryEvents` Table to find the Registry Run-key
+### 3. Searched the `HartwellHTTPEnriched_CL` Table to find the encoding
 
-Reviewed registry write events under the Run key and identified a disguised value name, masquerading as a legitimate Windows Update, whose data pointed back to the implant staged in Temp.
+Found the two-layer encoding scheme the attacker had used to encode the commands which was in a reverse order
 
 **Query used to locate events:**
 
 ```kql
-let start_time = datetime(2026-04-22T02:00:00.00Z);
-let end_time = datetime(2026-04-22T08:00:00.00Z);
-let HostInQuestion = "npt-ws01";
-DeviceRegistryEvents
-| where Timestamp between (start_time .. end_time)
-| where DeviceName == HostInQuestion
-| where RegistryKey contains "run"
-| where isnotempty(RegistryValueName) 
-| project DeviceName, ActionType, RegistryKey, RegistryValueName, RegistryValueData, InitiatingProcessCommandLine, InitiatingProcessFileName, InitiatingProcessAccountName
+HartwellHTTPEnriched_CL
+| where OriginalTime between (datetime(2026-10-23T04:00:00Z) .. datetime(2026-10-23T16:00:00Z))
+| where id_orig_h == "192.168.1.100"
+| extend h = extract_all(@'"?([A-Za-z0-9-]+)"?\s*[:=]', request_headers)
+| mv-expand h to typeof(string)
+| summarize Count=count(), Example=take_any(uri) by h
+| order by Count asc
+
 ```
-<img width="1435" height="110" alt="image" src="https://github.com/user-attachments/assets/69ec52e2-8a10-4ca9-a22a-224f8c8ce5b8" />
+<img width="419" height="284" alt="image" src="https://github.com/user-attachments/assets/f639b1b0-13f5-4be3-b2bd-b8528afaa483" />
+
 
 
 ---
-
-### 8. Searched the `DeviceProcessEvents` Table to find the scheduled task
-
-Identified the schtasks.exe /create command and extracted the /tn argument, revealing a scheduled task name disguised to impersonate a well known software updater.
-
-**Query used to locate events:**
-
-```kql
-let start_time = datetime(2026-04-22T02:00:00.00Z);
-let end_time = datetime(2026-04-22T08:00:00.00Z);
-let HostInQuestion = "npt-ws01";
-DeviceProcessEvents
-| where Timestamp between (start_time .. end_time)
-| where DeviceName == HostInQuestion
-| where ProcessCommandLine contains "net user"
-| project DeviceName, ActionType, ProcessCommandLine, InitiatingProcessCommandLine, InitiatingProcessFileName, InitiatingProcessAccountName
-
-```
-<img width="1422" height="101" alt="image" src="https://github.com/user-attachments/assets/a8bd609b-1a6a-4711-a9c1-4ae1d374a349" />
-<img width="788" height="415" alt="image" src="https://github.com/user-attachments/assets/b94fba91-41f6-41c8-9669-03931a27d2ab" />
-
-
----
-
+## Section 4: Mapping the Territory
   ### 9. Searched the `DeviceProcessEvents` Table to find the Installed Update Name
 
 Identified the sc.exe create command and confirmed the installed service's name and bin path both pointed back to the implant, disguised under a name masquerading as a legitimate Windows health service.
