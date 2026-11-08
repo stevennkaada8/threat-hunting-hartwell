@@ -2,10 +2,9 @@
 # Official [Cyber Range](http://joshmadakor.tech/cyber-range) Project
 <img width="1200" height="675" alt="image" src="https://github.com/user-attachments/assets/8ae8c79e-6282-42c2-8151-dbf73dbc2a46" />
 
-# Threat Hunt Report: Unauthorised Access on Helpdesk Account
+# Threat Hunt Report: The Hartwell Breach
 
 ## Platforms and Languages Leveraged
-- Windows 10 Virtual Machines (Microsoft Azure)
 - EDR Platform: Microsoft Defender for Endpoint
 - Kusto Query Language (KQL)
 
