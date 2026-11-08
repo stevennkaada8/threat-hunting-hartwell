@@ -1,4 +1,4 @@
-# threat-hunting-hartwell
+
 # Official [Cyber Range](http://joshmadakor.tech/cyber-range) Project
 <img width="1200" height="675" alt="image" src="https://github.com/user-attachments/assets/8ae8c79e-6282-42c2-8151-dbf73dbc2a46" />
 
@@ -174,151 +174,297 @@ HartwellHTTPEnriched_CL
 
 ---
 ## Section 4: Mapping the Territory
-  ### 9. Searched the `DeviceProcessEvents` Table to find the Installed Update Name
+  ### 1. Searched the `HartwellSysmon_CL` Table to find the network discovery commands that were executed
 
-Identified the sc.exe create command and confirmed the installed service's name and bin path both pointed back to the implant, disguised under a name masquerading as a legitimate Windows health service.
+Identified the three network commands which were executed by the attacker under the "www-data" user
 
 **Query used to locate events:**
 
 ```kql
-let start_time = datetime(2026-04-22T02:00:00.00Z);
-let end_time = datetime(2026-04-22T08:00:00.00Z);
-let HostInQuestion = "npt-ws01";
-DeviceProcessEvents
-| where Timestamp between (start_time .. end_time)
-| where DeviceName == HostInQuestion
-| where ProcessCommandLine contains "tn"
-| project DeviceName, ActionType, ProcessCommandLine, InitiatingProcessCommandLine, InitiatingProcessFileName, InitiatingProcessAccountName
+HartwellSysmon_CL
+| where OriginalTime between (datetime(2026-10-23T04:00:00Z) .. datetime(2026-10-23T16:00:00Z))
+| where EventID == 1
+| where User == "www-data"
+| project OriginalTime, Image, CommandLine, ParentImage
+| order by OriginalTime asc
 
 ```
-<img width="1420" height="140" alt="image" src="https://github.com/user-attachments/assets/3a5494d5-cd15-475f-ac93-ced8b06dd122" />
-<img width="744" height="80" alt="image" src="https://github.com/user-attachments/assets/e9dff0c6-fa54-4d38-8362-7bfcae757ef0" />
+<img width="371" height="287" alt="image" src="https://github.com/user-attachments/assets/cdeaa5d4-3451-4e34-9b8e-0f2ca6562bba" />
+<img width="354" height="293" alt="image" src="https://github.com/user-attachments/assets/a3de6d3b-6692-4f89-82da-f9c18dfa4d60" />
+<img width="351" height="300" alt="image" src="https://github.com/user-attachments/assets/bb160f8e-85d4-4763-b61a-b6a94eaf8e99" />
+
 
 ---
 
-### 10. Searched the `DeviceProcessEvents` Table to find the backdoor user
+### 2. Searched the `HartwellSysmon_CL` Table to find the security tools scanned
 
-Reviewed net.exe/net1.exe activity and confirmed two correlated events seconds apart. Account creation followed immediately by addition to the local Administrators group attributing the backdoor account name used for privilege escalation.
+The attacker had been looking for security monitoring tools that are being used before proceeding with the next steps
 
 **Query used to locate events:**
 
 ```kql
-let start_time = datetime(2026-04-22T02:00:00.00Z);
-let end_time = datetime(2026-04-22T08:00:00.00Z);
-let HostInQuestion = "npt-ws01";
-DeviceProcessEvents
-| where Timestamp between (start_time .. end_time)
-| where DeviceName == HostInQuestion
-| where ProcessCommandLine contains "tn"
-| project DeviceName, ActionType, ProcessCommandLine, InitiatingProcessCommandLine, InitiatingProcessFileName, InitiatingProcessAccountName
+HartwellSysmon_CL
+| where OriginalTime between (datetime(2026-10-23T04:00:00Z) .. datetime(2026-10-23T16:00:00Z))
+| where EventID == 1
+| where User == "www-data"
+| project OriginalTime, Image, CommandLine, ParentImage
+| order by OriginalTime asc
+
+HartwellSysmon_CL
+| where OriginalTime between (datetime(2026-10-23T04:00:00Z) .. datetime(2026-10-23T16:00:00Z))
+| where tostring(EventID) == "1"
+| where CommandLine has_any ("splunk", "sysmon", "auditd", "audit", "wazuh", "ossec", "falco", "osquery", "clamav", "crowdstrike", "edr", "antivirus")
+| project OriginalTime, User, Image, CommandLine
+| order by OriginalTime asc
 
 ```
-<img width="1435" height="125" alt="image" src="https://github.com/user-attachments/assets/804d1bdc-20fe-45f7-932d-a7210c44ff64" />
-<img width="598" height="70" alt="image" src="https://github.com/user-attachments/assets/2302b344-e780-45aa-b9bb-a51b99378f12" />
+<img width="399" height="286" alt="image" src="https://github.com/user-attachments/assets/77d07644-2a8c-4c82-80d8-cad0cc8910d0" />
+<img width="382" height="299" alt="image" src="https://github.com/user-attachments/assets/76400c25-0c5a-40c9-a569-d0b5c0ffcdbe" />
+
+
+---
+## Section 5: Credential Harvest
+### 1. Searched the 'HartwellSysmon_CL' Table to find the configuration file obtained
+
+The attacker had read the "wp-config.php" which is the Wordpress configuration file which contained the database
+
+**Query used to locate events:**
+
+```kql
+HartwellSysmon_CL
+| where OriginalTime between (datetime(2026-10-23T04:00:00Z) .. datetime(2026-10-23T16:00:00Z))
+| where tostring(EventID) == "1"
+| where User == "www-data"
+| where CommandLine has_any ("cat ", "head ", "tail ", "grep ", "less ", "more ", "base64 ", "cp ", "strings ")
+| project OriginalTime, CommandLine
+| order by OriginalTime asc
+
+```
+<img width="415" height="256" alt="image" src="https://github.com/user-attachments/assets/ec3844f5-9923-4dad-bcfd-3193f4cbf0f2" />
 
 ---
 
-### 11. Searched the `DeviceInfo` and 'AlertEvidence' Table to find the second host
+### 2. Searched the `HartwellSysmon_CL` Table to find the table that wwas dumped and the column for passsword
 
-Reviewed alert evidence and device onboarding status across the wider host fleet to identify a second host, beyond the primary compromised endpoint, showing evidence of lateral-movement activity.
+The attacker had queried the database to obtain credentials which also included the passwords
 
 **Query used to locate events:**
 
 ```kql
-let start_time = datetime(2026-04-22T02:00:00.00Z);
-let end_time = datetime(2026-04-22T08:00:00.00Z);
-let HostInQuestion = "npt-ws01";
-DeviceInfo
-| where Timestamp between (start_time .. end_time)
+HartwellSysmon_CL
+| where OriginalTime between (datetime(2026-10-23T04:00:00Z) .. datetime(2026-10-23T16:00:00Z))
+| where tostring(EventID) == "1" and User == "www-data"
+| where CommandLine has_any ("mysql", "mysqldump", "psql", "sqlite")
+| project OriginalTime, CommandLine
+| order by OriginalTime asc
 
-let start_time = datetime(2026-04-22T02:00:00.00Z);
-let end_time = datetime(2026-04-22T08:00:00.00Z);
-let HostInQuestion = "npt-ws01";
-AlertEvidence
-| where TimeGenerated between (start_time .. end_time)
 
 ```
-<img width="1444" height="359" alt="image" src="https://github.com/user-attachments/assets/5daba7c6-6f0e-4d0a-b562-b9fa62a31487" />
-<img width="751" height="364" alt="image" src="https://github.com/user-attachments/assets/605e8d23-eef2-4c93-b35d-19ec0bf526ba" />
+<img width="420" height="226" alt="image" src="https://github.com/user-attachments/assets/de19768a-c0fc-4989-9601-bc965b02bc47" />
 
+---
+## Section 6: Fighting The Watchers
+### 1. Searched the `HartwellSysmon_CL` Table to find which security tools the attacker tried to disable
+
+The attacker had attempted to disable the security tools that were on the server
+
+**Query used to locate events:**
+
+```kql
+HartwellSysmon_CL
+| where OriginalTime between (datetime(2026-10-23T04:00:00Z) .. datetime(2026-10-23T16:00:00Z))
+| where tostring(EventID) == "1"
+| where User == "www-data"
+| where CommandLine has_any ("systemctl", "service ", "auditctl", "kill", "pkill", "chkconfig")
+| project OriginalTime, Image, CommandLine
+| order by OriginalTime asc
+
+HartwellSysmon_CL
+| where OriginalTime between (datetime(2026-10-23T04:00:00Z) .. datetime(2026-10-23T16:00:00Z))
+| where tostring(EventID) == "1"
+| where CommandLine has_any ("systemctl stop")
+| project OriginalTime, Image, CommandLine
+| order by OriginalTime asc
+
+```
+<img width="390" height="242" alt="image" src="https://github.com/user-attachments/assets/4af8f3cf-cae0-4761-802b-17f11c117c7a" />
+<img width="411" height="290" alt="image" src="https://github.com/user-attachments/assets/bf1a4010-2932-4812-b45e-1855044a17e9" />
+<img width="426" height="289" alt="image" src="https://github.com/user-attachments/assets/e96ce5e8-fab3-40e3-9068-d8a0d26b0d5f" />
+
+---
+### 2. The attacker wasn't able to successfully disable the services with the systemctl stop command because the user ""www-data" didn't have the privileges so they were denied 
+
+---
+## Section 7: Digging In
+### 1. Searched the `HartwellSysmon_CL` Table to find the mechanism installed
+
+The attacker had installed a mechanism to maintain access to the host
+
+**Query used to locate events:**
+
+```kql
+HartwellSysmon_CL
+| where OriginalTime between (datetime(2026-10-23T04:00:00Z) .. datetime(2026-10-23T16:00:00Z))
+| where tostring(EventID) == "1"
+| where User == "www-data"
+| where CommandLine has_any ("crontab", "cron", "systemctl enable", ".service", "authorized_keys", "ssh-keygen", "rc.local", ".bashrc", "profile", "at ", "useradd", "chmod +x")
+| project OriginalTime, Image, CommandLine
+| order by OriginalTime asc
+
+```
+<img width="407" height="328" alt="image" src="https://github.com/user-attachments/assets/37153fc2-6e12-447e-9d78-0ad038fd567a" />
+
+
+
+---
+### 2. Searched the `HartwellSysmon_CL` Table to find the hidden implant
+
+The attacker had installed an implant with the mechanism which was shown as "/dev/shm/.cache-helper"
+
+**Query used to locate events:**
+
+```kql
+HartwellSysmon_CL
+| where OriginalTime between (datetime(2026-10-23T04:00:00Z) .. datetime(2026-10-23T16:00:00Z))
+| where tostring(EventID) == "1"
+| where User == "www-data"
+| where CommandLine has_any ("crontab", "cron", "systemctl enable", ".service", "authorized_keys", "ssh-keygen", "rc.local", ".bashrc", "profile", "at ", "useradd", "chmod +x")
+| project OriginalTime, Image, CommandLine
+| order by OriginalTime asc
+
+```
+---
+## Section 8: Damage Assessment
+### 1. How did the attacker exfiltrate stolen data (wp-config.php contents and database records) from the server?
+
+The attacker had base64 encoded wp-config.php and wp_users.table on the server
+
+### 2. A colleague suggests the attacker may have moved laterally to other systems on the 192.168.1.0/24 network. Examine the available evidence. Is there any indication of lateral movement from the compromised host?
+
+No, there is no evidence of lateral movement: the 45 decoded commands contain no SSH, SCP, rsync or netcat activity, there were no outbound connections to other hosts, and www-data has no credentials valid for remote authentication
 
 ---
 ## Chronological Event Timeline 
 
-### 1. Initial Access — Compromised Account
+### 1. Reconnaissance — Nmap Scan
 
-- **Timestamp:** `2026-04-22T04:47:13
-- **Event:** The "helpdesk" service account authenticated to NPT-WS01 over the network from an external IP address, bypassing normal interactive logon controls.
-- **Action:** Action: Logon success detected (network service exploitation tool activity).
-- **Source IP:** 20.110.92.50
+- **Timestamp:** `2026-10-23T14:52:15
+- **Event:** 192.168.1.100 probed the Hartwell web server with Nmap, requesting /robots.txt, /.git/HEAD, /sdk, /HNAP1, /evox/about and the Nmap-specific path /nmaplowercheck....
+- **Action:** Vulnerability scanning detected (Nmap user agent).
+- **Source IP:** 192.168.1.100
 
-### 2. File Drop — Implant Delivered
+### 2. Initial Access — PHP Session Upload-Progress Exploi
 
-- **Timestamp:** `2026-04-22T04:59:22`
-- **Event:** A file named WindowsUpdate.exe was dropped and launched from a remote location onto NPT-WS01, initiated via WMI rather than by a local user.
-- **Action:** File dropped and launched from remote location.
-- **Command:** `tor-browser-windows-x86_64-portable-14.0.1.exe /S`
-- **File Path:** `C:\Windows\Temp\WindowsUpdate.exe`
+- **Timestamp:** `2026-10-23T14:55:19
+- **Event:** The attacker sent crafted requests to check_progress.php?sid=ph2sh_... and index.php. The Apache error log recorded three PHP session warnings (invalid session ID, failed session read, failed session write), which show the session.upload_progress feature being abused.
+- **Action:** Exploit delivered via POST with multipart/form-data.
+- **Content-Type:** multipart/form-data; boundary=----0x4148php2shel
+  
+### 3. File Drop — Webshell Planted
 
-### 3. Command & Control — Outbound Beacon
+- **Timestamp:** `2026-10-23T14:45:50
+- **Event:** A new file appeared in the webroot and received 46 requests from the attacker. It was not part of the scanning phase.
+- **Action:** Webshell dropped and used.
+- **File Path:** /var/www/html/health-check.php
 
-- **Timestamp:** `2026-04-22T05:45:48`
-- **Event:** Cmd.exe, spawned by WindowsUpdate.exe, exhibited suspicious behaviour while communicating outbound over port 443 to an external domain, confirming an active C2 channel.
-- **Action:** Suspicious behaviour by cmd.exe observed.
-- **Remote URL:** `updates.abordasync.website`
+### 4. Execution — Obfuscated Header-Triggered Shell
 
-### 4. Persistence — Registry Run Key
+- **Timestamp:** `2026-10-23T15:01:23
+- **Event:** The webshell began executing commands as www-data, driven by a custom HTTP header instead of URL parameters. Each PHP payload was ROT13-encoded and then base64-encoded, and the shell decodes in reverse before running it.
+- **Action:** Command execution through the webshell. First commands were id and whoami.
+- **Header:** X-HMG-Debug
+- **Account:** www-data
+- 
+### 5. Discovery — System and Network Mapping
 
-- **Timestamp:** `2026-04-22T05:38:39`
-- **Event:** A Run key value was written under ...\CurrentVersion\Run, disguised as a legitimate health-check task, pointing back at the implant in C:\Windows\Temp\.
-- **Action:** Anomaly detected in ASEP (autostart execution point) registry.
-- **Registry Value:** `WindowsHealthCheck`
+- **Timestamps:** '2026-10-23T15:01:42 to 15:12:57'
+- **Event:** The attacker identified the host and mapped the local network, then listed accounts and tried to read the shadow file.
+- **Action:** System and network discovery.
+- **Command:** 'uname -a, hostname, ip a (15:02:18), ss -tlnp (15:02:28), cat /etc/passwd (15:02:39), cat /etc/shadow (15:02:54), ip neigh (15:12:57)'
 
-### 5. Persistence — Scheduled Task
+### 6. Discovery — Security Tooling Check
 
-- **Timestamps:** '2026-04-22T05:43:15'
-- **Event:** A scheduled task was created via schtasks, impersonating a well-known software updater, configured to relaunch the implant.
-- **Action:** Suspicious scheduled task created.
-- **Command:** 'cmd.exe /c schtasks /create /tn GoogleUpdaterTask /tr C:\Windows\Temp\WindowsUpdate.exe /sc ...'
+- **Timestamp:** `2026-10-23T15:02:57`
+- **Event:** The attacker searched installed packages for monitoring tools, then listed running services and checked their status.
+- **Action:** Security software discovery.
+- **Commands:** `dpkg -l | grep -iE 'splunk|sysmon|auditd|wazuh|ossec', systemctl list-units (15:13:21), systemctl is-active sysmon auditd SplunkForwarder (15:14:14)
 
-### 6. Persistence — Windows Service
+### 7. Credential Access — Configuration File
 
-- **Timestamp:** `2026-04-22T05:44`
-- **Event:** A Windows service was installed via sc.exe, with both the service name and binPath masquerading as a legitimate Windows health service, pointing back at the implant.
-- **Action:** Masqueraded task or service.
-- **Service Name:** `WindowsHealthSvc`
-
-### 7. Privilege Escalation — Backdoor Account Created
-
-- **Timestamp:** `2026-04-22T05:45:48`
-- **Event:** A new local account was created on NPT-WS01 by cmd.exe, running as SYSTEM under WindowsUpdate.exe.
-- **Action:** Suspicious account creation.
-- **Command:** `cmd.exe /c net user nexus_admin ********** /add`
+- **Timestamp:** `2026-10-23T15:03:10`
+- **Event:** The attacker read the WordPress configuration file to get the database credentials, and returned to it several times.
+- **Action:** Credentials harvested from a configuration file.
+- **Command:** `grep -E 'DB_|TABLE_PREFIX' /var/www/html/wp-config.php'
+- **File Path:** `/var/www/html/wp-config.php'
 ---
 
-### 8. Privilege Escalation — Admin Group Added
+### 8. Credential Access — Database Dump
 
-- **Timestamp:** `2026-04-22T05:46:57`
-- **Event:** The newly created account was immediately promoted to the local Administrators group, completing the privilege-escalation sequence.
-- **Action:** Suspicious Windows account manipulation.
-- **Command:** `net localgroup Administrators nexus_admin /add`
+- **Timestamp:** `2026-10-23T15:03:42`
+- **Event:** The attacker queried the WordPress database for account details and password hashes. The queries succeeded at 15:09:06 once the password from wp-config.php was added to the command line.
+- **Action:** Credential dump from the database.
+- **Command:** `mysql -u wpuser -p********** wordpress -e "SELECT user_login,user_pass FROM wp_users"
+- **Table/Column:** `wp_users / user_pass'
 ---
 
-### 9. Lateral Movement — Second Host
+### 9. Defense Evasion — Attempt to Disable Monitoring
 
-- **Timestamp:** `2026-04-22T05:37:06`
-- **Event:** A PowerShell suspicious web request alert fired on a second host, indicating the attacker's activity extended beyond NPT-WS01 within the same operational window.
-- **Action:** PowerShell Suspicious Web Request detected.
-- **Device:** `npt-srv01`
+- **Timestamp:** `2026-10-23T15:13:55`
+- **Event:** The attacker tried to flush the audit rules and stop all three monitoring services, then checked whether it had worked. The attempts failed because www-data has no privileges to stop system services, and logging continued.
+- **Action:** Impair defenses attempted and unsuccessful.
+- **Commands:** `auditctl -D, systemctl stop sysmon (15:14:01), systemctl stop SplunkForwarder (15:14:07), systemctl is-active sysmon auditd SplunkForwarder (15:14:14)'
+- **Services Targeted:** sysmon, auditd, SplunkForwarder
+---
+
+### 10. Exfiltration — Encoded Data Returned over HTTP
+
+- **Timestamp:** `2026-10-23T15:14:39`
+- **Event:** The attacker base64-encoded wp-config.php and the full wp_users table, and the output came back in the webshell’s HTTP responses. No new outbound connection was opened.
+- **Action:** Exfiltration over the existing command-and-control channel.
+- **Commands:** `base64 /var/www/html/wp-config.php, mysql ... "SELECT * FROM wp_users" | base64 (15:15:15)'
+---
+
+### 11. Persistence — Cron Job and Hidden Implant
+
+- **Timestamp:** `2026-10-23T15:15:49`
+- **Event:** The attacker copied sleep into a hidden file in memory-backed storage and added a crontab entry to run it every 5 minutes.
+- **Action:** Scheduled task/job created (T1053.003).
+- **Command:** `(crontab -l; echo "*/5 * * * * /dev/shm/.cache-helper 300") | crontab - (15:16:00)'
+- **File Path:** /dev/shm/.cache-helper
+---
+
+### 12. Impact — Ransom Note Written
+
+- **Timestamp:** `2026-10-23T15:16:23`
+- **Event:** The attacker wrote a ransom note to the webroot claiming RSA-4096 encryption and demanding 15 BTC. None of the commands I saw encrypt anything, so this looks like a note only.
+- **Action:** Ransom note created.
+- **File Path:** `/var/www/html/NOTICE.txt'
+- **Contact:** recover_hmg@proton.me (reference HMG-2026-4891)
+---
+
+### 13. Defense Evasion — Checking Own Footprint
+
+- **Timestamp:** `2026-10-23T15:18:52`
+- **Event:** The attacker read the Apache, Sysmon and audit logs to see whether their activity had been recorded.
+- **Action:** `Log review.'
+- **Commands:** tail -30 /var/log/apache2/access.log, tail -40 /var/log/sysmon/sysmon.log, ausearch -ui 33 (uid 33 is www-data)
+---
+
+### 14. Lateral Movement — Not Observed
+
+- **Timestamp:** `N/A`
+- **Event:** None of the 45 decoded commands used SSH, SCP, rsync or netcat against another host, there were no outbound connections to other systems, and www-data holds no credentials valid for remote authentication.
+- **Action:** `No lateral movement detected.'
+
 ---
 ## Summary
 
-An external attacker gained unauthorised access to "NPT-WS01" using the compromised "helpdesk" service account, authenticating remotely from IP 20.110.92.50. Within minutes, the attacker used WMI to remotely execute a disguised implant (WindowsUpdate.exe) dropped into C:\Windows\Temp\, which established an outbound command-and-control channel to updates.abordasync.website. The attacker then laid down three independent persistence mechanisms — a registry Run key, a scheduled task, and a Windows service, each masquerading as legitimate update or health-check tooling — before creating a backdoor local account (nexus_admin) and promoting it to the Administrators group. In the same window, related PowerShell command-and-control activity was observed on a second host, "npt-srv01", indicating the attacker's reach extended beyond the initial point of compromise. This sequence of activities indicates a deliberate, multi-stage intrusion involving credential abuse, remote execution, redundant persistence, privilege escalation, and lateral movement — not an isolated or accidental event.
+An attacker at 192.168.1.100 scanned the Hartwell Medical Group WordPress server with Nmap, then gained a foothold by abusing the PHP session upload-progress feature through multipart POST requests. The attacker planted a webshell (health-check.php) that took commands in a custom header (X-HMG-Debug), each ROT13 and base64 encoded, and ran them as the www-data account. They mapped the system and network, checked for security tooling, and read wp-config.php for database credentials. They then dumped the wp_users table, including the password hashes, and returned the data base64-encoded over the same HTTP channel. An attempt to disable Sysmon, auditd and the Splunk forwarder failed because www-data lacks the privileges. The attacker then added a cron job running a disguised binary from /dev/shm, left a ransom note in the webroot, and checked the logs for traces of their activity. No evidence of lateral movement was found. The sequence indicates a deliberate, multi-stage intrusion that combined exploitation, credential theft, failed defense evasion, persistence and extortion, with activity confined to the web server.
 
 ---
 
 ## Response Taken
 
-The compromise of NPT-WS01 was confirmed, along with related activity on a second host, npt-srv01. Both devices were network-isolated, the "helpdesk" account was disabled and its credentials reset, the backdoor account nexus_admin was disabled, and outbound traffic to 20.110.92.50 and updates.abordasync.website was blocked at the perimeter. IT security management and the Finance team were notified.
+The web server (192.168.1.120) was network-isolated and 192.168.1.100 was blocked at the perimeter. health-check.php and NOTICE.txt were removed, as were the www-data crontab entry and /dev/shm/.cache-helper. The database password, the WordPress auth keys and salts, and all WordPress user passwords were reset, since the hashes were exposed. PHP session upload-progress handling was reviewed and patched, and Sysmon, auditd and the Splunk forwarder were confirmed running. IT security management and the compliance team were notified of the potential patient-data exposure.
 
 ---
